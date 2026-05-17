@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetMonly Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+
+        /* Efek Pulse untuk Packet Loss 100% atau Latency Tinggi */
+        .bg-emergency {
+            background-color: rgba(220, 38, 38, 0.2) !important;
+            animation: pulse-red 2s infinite;
+            border-color: #ef4444 !important;
+        }
+
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen p-6">
+
+    <div class="max-w-7xl mx-auto">
+        <div class="flex flex-col md:flex-row justify-between items-center mb-10 gap-4">
+            <h1 class="text-3xl font-bold text-blue-500 tracking-tight flex items-center gap-2">
+                <img src="assets/logo.png" alt="NetMonly Logo" class="w-20 h-20 object-contain"> NETMONLY <span class="font-light text-gray-500">v1.0</span>
+            </h1>
+            <div class="flex items-center gap-4">
+                <div id="connectionStatus"></div>
+                <a href="/logout" class="bg-red-900/30 text-red-400 border border-red-800/50 px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-700 hover:text-white transition-all">LOGOUT</a>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
+            <div class="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl">
+                <h3 class="text-gray-500 text-sm font-semibold uppercase mb-2">Throughput</h3>
+                <p class="text-3xl font-bold text-white"><span id="val-bandwidth">0.0</span> <span class="text-sm text-gray-600">Mbps</span></p>
+                <div class="mt-4 text-xs text-blue-500 font-mono">Live Throughput</div>
+            </div>
+
+            <div class="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl border-t-4 border-t-blue-600">
+                <h3 class="text-gray-500 text-sm font-semibold uppercase mb-2">Connected</h3>
+                <p class="text-3xl font-bold text-white"><span id="deviceCount">0</span> <span class="text-sm text-gray-600">Devices</span></p>
+                <div class="mt-4 text-xs text-gray-400 font-mono italic">Discovery</div>
+            </div>
+
+            <div id="latencyCard" class="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl transition-all duration-500">
+                <h3 class="text-gray-500 text-sm font-semibold uppercase mb-2">Latency</h3>
+                <p class="text-3xl font-bold"><span id="val-latency">0</span> <span class="text-sm text-gray-600">ms</span></p>
+                <div id="lat-label" class="mt-4 text-xs font-mono uppercase">Stable</div>
+            </div>
+
+            <div id="packetLossCard" class="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl transition-all duration-500">
+                <h3 class="text-gray-500 text-sm font-semibold uppercase mb-2">Packet Loss</h3>
+                <p class="text-3xl font-bold"><span id="val-packetloss">0</span> <span class="text-sm text-gray-600">%</span></p>
+                <div id="pl-label" class="mt-4 text-xs font-mono uppercase">Excellent</div>
+            </div>
+        </div>
+
+        <div class="bg-gray-900 p-8 rounded-2xl border border-gray-800 shadow-xl mb-10">
+            <h3 class="text-gray-300 font-bold mb-6">Traffic Analysis</h3>
+            <div class="h-80 w-full">
+                <canvas id="trafficChart"></canvas>
+            </div>
+        </div>
+
+        <div class="bg-gray-900 p-8 rounded-2xl border border-gray-800 shadow-xl">
+            <div class="flex justify-between items-center mb-8">
+                <h3 class="text-gray-300 font-bold">Device Discovery</h3>
+                <span class="text-[10px] text-blue-500 font-mono uppercase tracking-widest animate-pulse">Scanning Network...</span>
+            </div>
+            <div id="deviceListContainer" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6"></div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const ctx = document.getElementById('trafficChart').getContext('2d');
+        const trafficChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: Array(20).fill(''),
+                datasets: [{
+                    label: 'Mbps',
+                    data: Array(20).fill(0),
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    fill: true, tension: 0.4, pointRadius: 0
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: { 
+                    y: { grid: { color: '#1f2937' }, ticks: { color: '#6b7280' } },
+                    x: { display: false }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+
+        socket.on('update_data', (data) => {
+            // Update Status Online/Offline
+            document.getElementById('connectionStatus').innerHTML = data.status === 'Online' ? 
+                '<span class="bg-green-950 text-green-400 px-4 py-2 rounded-full border border-green-800 text-xs flex items-center gap-2"><span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> SYSTEM LIVE</span>' :
+                '<span class="bg-red-950 text-red-400 px-4 py-2 rounded-full border border-red-800 text-xs font-bold">● SYSTEM OFFLINE</span>';
+
+            // Update Bandwidth & Device Count
+            document.getElementById('val-bandwidth').innerText = data.bandwidth;
+            document.getElementById('deviceCount').innerText = data.activeDevices;
+
+            // --- LOGIKA PEWARNAAN LATENCY ---
+            const latVal = document.getElementById('val-latency');
+            const latCard = document.getElementById('latencyCard');
+            const latLabel = document.getElementById('lat-label');
+            
+            latVal.innerText = data.latency;
+            latVal.className = 'text-3xl font-bold';
+            latCard.classList.remove('border-yellow-600', 'border-red-600', 'border-gray-800', 'bg-emergency');
+
+            if (data.latency < 50) {
+                latVal.classList.add('text-green-400');
+                latLabel.innerText = "Stable";
+                latLabel.className = "mt-4 text-xs font-mono uppercase text-green-600";
+                latCard.classList.add('border-gray-800');
+            } else if (data.latency >= 50 && data.latency < 150) {
+                latVal.classList.add('text-yellow-400');
+                latLabel.innerText = "High Latency";
+                latLabel.className = "mt-4 text-xs font-mono uppercase text-yellow-600";
+                latCard.classList.add('border-yellow-600');
+            } else {
+                latVal.classList.add('text-red-500');
+                latLabel.innerText = "Extreme Lag";
+                latLabel.className = "mt-4 text-xs font-mono uppercase text-red-600";
+                latCard.classList.add('bg-emergency');
+            }
+
+            // --- LOGIKA PEWARNAAN PACKET LOSS ---
+            const plVal = document.getElementById('val-packetloss');
+            const plCard = document.getElementById('packetLossCard');
+            const plLabel = document.getElementById('pl-label');
+            
+            plVal.innerText = data.packetLoss;
+            plVal.className = 'text-3xl font-bold';
+            plCard.classList.remove('bg-emergency', 'border-yellow-600', 'border-gray-800');
+            
+            if (data.packetLoss == 0) {
+                plVal.classList.add('text-green-500');
+                plLabel.innerText = "Excellent";
+                plLabel.className = "mt-4 text-xs font-mono uppercase text-green-600";
+                plCard.classList.add('border-gray-800');
+            } else if (data.packetLoss > 0 && data.packetLoss < 100) {
+                plVal.classList.add('text-yellow-500');
+                plLabel.innerText = "Unstable";
+                plLabel.className = "mt-4 text-xs font-mono uppercase text-yellow-600";
+                plCard.classList.add('border-yellow-600');
+            } else {
+                plVal.classList.add('text-red-500');
+                plLabel.innerText = "Disconnected";
+                plLabel.className = "mt-4 text-xs font-mono uppercase text-red-600";
+                plCard.classList.add('bg-emergency');
+            }
+
+            // Chart update
+            trafficChart.data.datasets[0].data.shift();
+            trafficChart.data.datasets[0].data.push(data.bandwidth);
+            trafficChart.update('none');
+
+            // List devices update
+            const listContainer = document.getElementById('deviceListContainer');
+            listContainer.innerHTML = '';
+            data.devices.forEach(dev => {
+                const card = document.createElement('div');
+                const isNamed = dev.name !== '?';
+                card.className = `p-4 rounded-xl border transition-all text-center ${isNamed ? 'bg-blue-900/10 border-blue-800/50' : 'bg-gray-800/40 border-gray-700'}`;
+                card.innerHTML = `
+                    <div class="font-bold text-xs truncate text-gray-200">${dev.name}</div>
+                    <div class="text-[9px] text-gray-500 mt-1 font-mono">${dev.ip}</div>
+                `;
+                listContainer.appendChild(card);
+            });
+        });
+    </script>
+</body>
+</html>

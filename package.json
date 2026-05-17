@@ -1,0 +1,23 @@
+{
+  "name": "web-monitoring",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "fast-speedtest-api": "^0.3.2",
+    "local-devices": "^4.0.0",
+    "ping": "^1.0.0",
+    "snmp-native": "^1.2.0",
+    "socket.io": "^4.8.3",
+    "systeminformation": "^5.31.6"
+  }
+}
